@@ -12,62 +12,165 @@ import (
 	"sync/atomic"
 )
 
-func (c *Client) Do(list []string, output string) (int64, error) {
-	var (
-		errCounts int64
-		wg        sync.WaitGroup
-	)
+var (
+	errRequests int64
+	quit        chan struct{}
+	pool        chan *worker
+	wg          sync.WaitGroup
+)
 
-	sem := make(chan struct{}, c.opt.MaxConcurrents)
+func (c *Client) Do(list []string) (int64, error) {
+	//ctx, ctxCancel := context.WithCancel(context.Background())
+	//defer ctxCancel()
 
-	ctx, ctxCancel := context.WithCancel(context.Background())
-	defer ctxCancel()
-
-	for _, v := range list {
-		wg.Add(1)
-		go func(target string) {
-			defer wg.Done()
-
-			var err error
-			for i := 0; int64(i) < c.opt.MaxAttempts; i++ {
-				if errCounts > c.opt.MaxErrorRequests {
-					break
-				}
-
-				sem <- struct{}{}
-				b, retry, err := c.download(ctx, target)
-				<-sem
-				if err != nil {
-					continue
-				}
-				if retry {
-					err = errors.New("StatusCode 5xx")
-					continue
-				}
-
-				err = save(target, output, b)
-				if err != nil {
-					break
-				}
-			}
-			if err != nil {
-				atomic.AddInt64(&errCounts, 1)
-				log.Println(err)
-			}
-		}(v)
+	maxQueues := len(list)
+	maxWorkers := int(c.opt.MaxConcurrents)
+	if maxWorkers == 0 {
+		maxWorkers = len(list)
 	}
-	wg.Wait()
 
-	return errCounts, nil
+	pool = make(chan *worker, maxWorkers)
+
+	d := newDispatcher(c, maxQueues, maxWorkers)
+	d.start()
+	for _, v := range list {
+		d.add(v)
+	}
+
+	d.wait()
+
+	return errRequests, nil
 }
 
-func (c *Client) download(ctx context.Context, target string) ([]byte, bool, error) {
+type dispatcher struct {
+	queue   chan string
+	workers []*worker
+}
+
+func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
+	d := &dispatcher{
+		queue: make(chan string, maxQueues),
+	}
+	d.workers = make([]*worker, maxWorkers)
+
+	for i := 0; i < maxWorkers; i++ {
+		w := worker{
+			client: c,
+			target: make(chan string),
+			quit:   make(chan struct{}),
+		}
+		d.workers[i] = &w
+	}
+	return d
+}
+
+func (d *dispatcher) start() {
+	for _, w := range d.workers {
+		w.start()
+	}
+	go func() {
+		for {
+			select {
+			case v := <-d.queue:
+				worker := <-pool
+				worker.target <- v
+			case <-quit:
+				d.stop()
+			}
+		}
+	}()
+}
+
+func (d *dispatcher) stop() {
+	for _, w := range d.workers {
+		w.quit <- struct{}{}
+	}
+}
+
+func (d *dispatcher) wait() {
+	wg.Wait()
+}
+
+func (d *dispatcher) add(v string) {
+	wg.Add(1)
+	d.queue <- v
+}
+
+type worker struct {
+	client *Client
+	target chan string
+	quit   chan struct{}
+}
+
+func (w *worker) start() {
+	output := w.client.opt.Output
+	maxAttempts := w.client.opt.MaxAttempts
+	maxErrRequests := w.client.opt.MaxErrorRequests
+	go func() {
+		for {
+			pool <- w
+			select {
+			case target := <-w.target:
+				var req *http.Request
+				var err error
+				var attempts int64
+				for {
+					attempts++
+					if maxAttempts != 0 && attempts > maxAttempts {
+						// give up
+						break
+					}
+
+					req, err = newRequest(context.Background(), target)
+					if err != nil {
+						break
+					}
+
+					b, retry, err := w.client.do(req)
+					if err != nil {
+						continue
+					}
+					if retry {
+						err = errors.New("HTTP Status Code 5xx")
+						continue
+					}
+
+					_, name := path.Split(target)
+					err = createFile(path.Join(output, name), b)
+					if err != nil {
+						continue
+					}
+
+					// successful
+					break
+				}
+				if err != nil {
+					log.Println(err)
+					atomic.AddInt64(&errRequests, 1)
+					if maxErrRequests != 0 && errRequests >= maxErrRequests {
+						close(quit)
+					}
+				}
+				wg.Done()
+
+			case <-w.quit:
+				return
+			}
+		}
+	}()
+}
+
+func newRequest(ctx context.Context, target string) (*http.Request, error) {
 	req, err := http.NewRequest("GET", target, nil)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	req = req.WithContext(ctx)
 
+	req = req.WithContext(ctx)
+	return req, nil
+}
+
+func (c *Client) do(req *http.Request) ([]byte, bool, error) {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, false, err
@@ -85,14 +188,12 @@ func (c *Client) download(ctx context.Context, target string) ([]byte, bool, err
 	return b, false, nil
 }
 
-func save(target, output string, body []byte) error {
-	_, fileName := path.Split(target)
-	file, err := os.Create(path.Join(output, fileName))
+func createFile(name string, body []byte) error {
+	file, err := os.Create(name)
 	if err != nil {
 		return err
 	}
 
-	// TODO
 	_, err = file.Write(body)
 	if closeErr := file.Close(); err == nil {
 		err = closeErr

@@ -10,6 +10,9 @@ var httpClient = &http.Client{}
 
 // Options represents Client's parameters.
 type Options struct {
+	// Output directory
+	Output string
+
 	// http.Client's Timeout.
 	// A Timeout of zero means no timeout.
 	Timeout time.Duration
@@ -17,14 +20,13 @@ type Options struct {
 	// Maximum number of concurrent requests.
 	// A MaxConcurrents of zero means no limit of number of requests.
 	MaxConcurrents int64
+	// Maximum number of errors before giving up the whole requests.
+	// A MaxErrorRequests of zero means try until all requests are done.
+	MaxErrorRequests int64
 
 	// Maximum number of retries before giving up a request.
 	// A MaxAttempts of zero means try until a request is success.
 	MaxAttempts int64
-	// Maximum number of error before giving up the whole requests.
-	// A MaxErrorRequests of zero means try until all requests are done.
-	// If MaxAttempts is zero, this parameter is ignored.
-	MaxErrorRequests int64
 }
 
 // Client represents http.Client with paralleldl options.
