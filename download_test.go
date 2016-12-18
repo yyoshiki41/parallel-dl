@@ -23,12 +23,37 @@ func TestDownload(t *testing.T) {
 		ts.URL + "/ok1",
 		ts.URL + "/ok2",
 	}
-	errCounts, err := client.Download(lists)
-	if err != nil {
-		t.Error(err)
+	errCounts := client.Download(lists)
+	if expected := int64(0); errCounts != expected {
+		t.Errorf("expected %d, but got %d", expected, errCounts)
 	}
-	if errCounts != 0 {
-		t.Errorf("expected %d, but got %d", 0, errCounts)
+}
+
+func TestDownloadError1(t *testing.T) {
+	dir, removeDir := createTestTempDir(t)
+	defer removeDir() // clean up
+
+	ts := runTestServer()
+	defer ts.Close()
+
+	opt := &Options{
+		Output:           dir,
+		MaxErrorRequests: 1,
+		MaxAttempts:      2,
+	}
+	client, err := New(opt)
+	if err != nil {
+		t.Fatalf("Failed to construct client: %s", err)
+	}
+
+	lists := []string{
+		ts.URL + "/ok1",
+		ts.URL + "/ok2",
+		ts.URL + "/error",
+	}
+	errCounts := client.Download(lists)
+	if expected := int64(1); errCounts != expected {
+		t.Errorf("expected %d, but got %d", expected, errCounts)
 	}
 }
 
