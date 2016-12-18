@@ -39,9 +39,7 @@ func (d *dispatcher) start() {
 		w.start(ctx)
 	}
 
-	maxErrRequests := int(d.workers[0].client.opt.MaxErrorRequests)
-	go func() {
-		defer ctxCancel()
+	go func(maxErrRequests int) {
 		for {
 			select {
 			case v := <-d.jobQueue:
@@ -52,10 +50,11 @@ func (d *dispatcher) start() {
 				if maxErrRequests != 0 && len(errChannel) >= maxErrRequests {
 					ctxCancel()
 					d.stop()
+					return
 				}
 			}
 		}
-	}()
+	}(int(d.workers[0].client.opt.MaxErrorRequests))
 }
 
 func (d *dispatcher) stop() {

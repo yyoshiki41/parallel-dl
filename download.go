@@ -25,10 +25,10 @@ func (c *Client) Download(list []string) (int64, error) {
 
 	d := newDispatcher(c, maxQueues, maxWorkers)
 	d.start()
+
 	for _, v := range list {
 		d.add(v)
 	}
-
 	d.wait()
 	return int64(len(errChannel)), nil
 }
