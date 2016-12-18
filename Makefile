@@ -11,5 +11,5 @@ test:
 	go test $(PKGS)
 
 test-ci:
-	@echo "go test -outjp"
-	@go test -outjp -race -coverprofile=coverage.txt -covermode=atomic $(PKGS)
+	@echo "go test"
+	@go test -race -coverprofile=coverage.txt -covermode=atomic $(PKGS)
