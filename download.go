@@ -7,13 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"sync"
 )
 
 var (
-	wg         sync.WaitGroup
 	errChannel chan error
-	workerPool chan *worker
 )
 
 // Download downloads the lists resources.
@@ -25,7 +22,6 @@ func (c *Client) Download(list []string) (int64, error) {
 	}
 
 	errChannel = make(chan error, maxQueues)
-	workerPool = make(chan *worker, maxWorkers)
 
 	d := newDispatcher(c, maxQueues, maxWorkers)
 	d.start()
@@ -35,96 +31,6 @@ func (c *Client) Download(list []string) (int64, error) {
 
 	d.wait()
 	return int64(len(errChannel)), nil
-}
-
-type dispatcher struct {
-	jobQueue chan string
-	workers  []*worker
-}
-
-func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
-	d := &dispatcher{
-		jobQueue: make(chan string, maxQueues),
-	}
-	d.workers = make([]*worker, maxWorkers)
-	for i := 0; i < maxWorkers; i++ {
-		w := worker{
-			client: c,
-			target: make(chan string),
-			quit:   make(chan struct{}),
-		}
-		d.workers[i] = &w
-	}
-	return d
-}
-
-func (d *dispatcher) start() {
-	ctx, ctxCancel := context.WithCancel(context.Background())
-	for _, w := range d.workers {
-		w.start(ctx)
-	}
-
-	maxErrRequests := int(d.workers[0].client.opt.MaxErrorRequests)
-	go func() {
-		defer ctxCancel()
-		for {
-			select {
-			case v := <-d.jobQueue:
-				worker := <-workerPool
-				worker.target <- v
-			case <-errChannel:
-				// Not accurate, because errChannel is a global variable.
-				if maxErrRequests != 0 && len(errChannel) >= maxErrRequests {
-					ctxCancel()
-					d.stop()
-				}
-			}
-		}
-	}()
-}
-
-func (d *dispatcher) stop() {
-	for _, w := range d.workers {
-		w.stop()
-	}
-}
-
-func (d *dispatcher) wait() {
-	wg.Wait()
-}
-
-func (d *dispatcher) add(v string) {
-	wg.Add(1)
-	d.jobQueue <- v
-}
-
-type worker struct {
-	client *Client
-	target chan string
-	quit   chan struct{}
-}
-
-func (w *worker) start(ctx context.Context) {
-	go func() {
-		for {
-			workerPool <- w
-			select {
-			case target := <-w.target:
-				err := w.client.download(ctx, target)
-				if err != nil {
-					errChannel <- err
-				}
-				wg.Done()
-
-			case <-w.quit:
-				return
-			}
-		}
-	}()
-}
-
-func (w *worker) stop() {
-	close(w.quit)
 }
 
 func (c *Client) download(ctx context.Context, target string) error {
