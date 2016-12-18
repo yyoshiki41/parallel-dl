@@ -15,7 +15,7 @@ var (
 )
 
 // Download downloads the lists resources.
-func (c *Client) Download(list []string) (int64, error) {
+func (c *Client) Download(list []string) int64 {
 	maxQueues := len(list)
 	maxWorkers := int(c.opt.MaxConcurrents)
 	if maxWorkers == 0 {
@@ -31,22 +31,21 @@ func (c *Client) Download(list []string) (int64, error) {
 		d.add(v)
 	}
 	d.wait()
-	return int64(len(errChannel)), nil
+	return d.errRequests
 }
 
 func (c *Client) download(ctx context.Context, target string) error {
-	var (
-		req *http.Request
-		err error
-	)
-
-	req, err = newRequest(ctx, target)
+	req, err := newRequest(ctx, target)
 	if err != nil {
 		return err
 	}
 
-	var attempts int64
 	maxAttempts := c.opt.MaxAttempts
+	var (
+		attempts int64
+		b        []byte
+		retry    bool
+	)
 	for {
 		attempts++
 		if maxAttempts != 0 && attempts > maxAttempts {
@@ -54,7 +53,7 @@ func (c *Client) download(ctx context.Context, target string) error {
 			break
 		}
 
-		b, retry, err := c.do(req)
+		b, retry, err = c.do(req)
 		if err != nil {
 			continue
 		}

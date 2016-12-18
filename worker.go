@@ -3,6 +3,7 @@ package paralleldl
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 )
 
 var (
@@ -10,9 +11,10 @@ var (
 )
 
 type dispatcher struct {
-	jobQueue   chan string
-	workers    []*worker
-	workerPool chan *worker
+	jobQueue    chan string
+	workers     []*worker
+	workerPool  chan *worker
+	errRequests int64
 }
 
 func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
@@ -39,22 +41,22 @@ func (d *dispatcher) start() {
 		w.start(ctx)
 	}
 
-	go func(maxErrRequests int) {
+	go func(maxErrRequests int64) {
 		for {
 			select {
 			case v := <-d.jobQueue:
 				worker := <-d.workerPool
 				worker.target <- v
 			case <-errChannel:
-				// Not accurate, because errChannel is a global variable.
-				if maxErrRequests != 0 && len(errChannel) >= maxErrRequests {
+				atomic.AddInt64(&d.errRequests, 1)
+				if maxErrRequests != 0 && d.errRequests >= maxErrRequests {
 					ctxCancel()
 					d.stop()
 					return
 				}
 			}
 		}
-	}(int(d.workers[0].client.opt.MaxErrorRequests))
+	}(d.workers[0].client.opt.MaxErrorRequests)
 }
 
 func (d *dispatcher) stop() {
