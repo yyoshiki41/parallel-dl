@@ -4,32 +4,28 @@ import (
 	"context"
 	"errors"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"path"
 	"sync"
-	"sync/atomic"
 )
 
 var (
-	errRequests int64
-	quit        chan struct{}
-	pool        chan *worker
-	wg          sync.WaitGroup
+	wg         sync.WaitGroup
+	errChannel chan error
+	workerPool chan *worker
 )
 
-func (c *Client) Do(list []string) (int64, error) {
-	//ctx, ctxCancel := context.WithCancel(context.Background())
-	//defer ctxCancel()
-
+// Download downloads the lists resources.
+func (c *Client) Download(list []string) (int64, error) {
 	maxQueues := len(list)
 	maxWorkers := int(c.opt.MaxConcurrents)
 	if maxWorkers == 0 {
 		maxWorkers = len(list)
 	}
 
-	pool = make(chan *worker, maxWorkers)
+	errChannel = make(chan error, maxQueues)
+	workerPool = make(chan *worker, maxWorkers)
 
 	d := newDispatcher(c, maxQueues, maxWorkers)
 	d.start()
@@ -38,21 +34,19 @@ func (c *Client) Do(list []string) (int64, error) {
 	}
 
 	d.wait()
-
-	return errRequests, nil
+	return int64(len(errChannel)), nil
 }
 
 type dispatcher struct {
-	queue   chan string
-	workers []*worker
+	jobQueue chan string
+	workers  []*worker
 }
 
 func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
 	d := &dispatcher{
-		queue: make(chan string, maxQueues),
+		jobQueue: make(chan string, maxQueues),
 	}
 	d.workers = make([]*worker, maxWorkers)
-
 	for i := 0; i < maxWorkers; i++ {
 		w := worker{
 			client: c,
@@ -65,17 +59,25 @@ func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
 }
 
 func (d *dispatcher) start() {
+	ctx, ctxCancel := context.WithCancel(context.Background())
 	for _, w := range d.workers {
-		w.start()
+		w.start(ctx)
 	}
+
+	maxErrRequests := int(d.workers[0].client.opt.MaxErrorRequests)
 	go func() {
+		defer ctxCancel()
 		for {
 			select {
-			case v := <-d.queue:
-				worker := <-pool
+			case v := <-d.jobQueue:
+				worker := <-workerPool
 				worker.target <- v
-			case <-quit:
-				d.stop()
+			case <-errChannel:
+				// Not accurate, because errChannel is a global variable.
+				if maxErrRequests != 0 && len(errChannel) >= maxErrRequests {
+					ctxCancel()
+					d.stop()
+				}
 			}
 		}
 	}()
@@ -83,7 +85,7 @@ func (d *dispatcher) start() {
 
 func (d *dispatcher) stop() {
 	for _, w := range d.workers {
-		w.quit <- struct{}{}
+		w.stop()
 	}
 }
 
@@ -93,7 +95,7 @@ func (d *dispatcher) wait() {
 
 func (d *dispatcher) add(v string) {
 	wg.Add(1)
-	d.queue <- v
+	d.jobQueue <- v
 }
 
 type worker struct {
@@ -102,27 +104,27 @@ type worker struct {
 	quit   chan struct{}
 }
 
-func (w *worker) start() {
+func (w *worker) start(ctx context.Context) {
 	output := w.client.opt.Output
 	maxAttempts := w.client.opt.MaxAttempts
-	maxErrRequests := w.client.opt.MaxErrorRequests
 	go func() {
 		for {
-			pool <- w
+			workerPool <- w
 			select {
 			case target := <-w.target:
 				var req *http.Request
 				var err error
+				req, err = newRequest(ctx, target)
+				if err != nil {
+					errChannel <- err
+					wg.Done()
+				}
+
 				var attempts int64
 				for {
 					attempts++
 					if maxAttempts != 0 && attempts > maxAttempts {
 						// give up
-						break
-					}
-
-					req, err = newRequest(context.Background(), target)
-					if err != nil {
 						break
 					}
 
@@ -145,11 +147,7 @@ func (w *worker) start() {
 					break
 				}
 				if err != nil {
-					log.Println(err)
-					atomic.AddInt64(&errRequests, 1)
-					if maxErrRequests != 0 && errRequests >= maxErrRequests {
-						close(quit)
-					}
+					errChannel <- err
 				}
 				wg.Done()
 
@@ -158,6 +156,10 @@ func (w *worker) start() {
 			}
 		}
 	}()
+}
+
+func (w *worker) stop() {
+	close(w.quit)
 }
 
 func newRequest(ctx context.Context, target string) (*http.Request, error) {
