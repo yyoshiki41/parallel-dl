@@ -3,8 +3,8 @@ package paralleldl
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"path"
@@ -66,7 +66,7 @@ func (c *Client) download(ctx context.Context, target string) error {
 		_, name := path.Split(target)
 		err = createFile(path.Join(c.opt.Output, name), b)
 		if err != nil {
-			fmt.Println(err)
+			log.Print(err)
 			continue
 		}
 
