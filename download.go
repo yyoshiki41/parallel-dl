@@ -105,47 +105,12 @@ type worker struct {
 }
 
 func (w *worker) start(ctx context.Context) {
-	output := w.client.opt.Output
-	maxAttempts := w.client.opt.MaxAttempts
 	go func() {
 		for {
 			workerPool <- w
 			select {
 			case target := <-w.target:
-				var req *http.Request
-				var err error
-				req, err = newRequest(ctx, target)
-				if err != nil {
-					errChannel <- err
-					wg.Done()
-				}
-
-				var attempts int64
-				for {
-					attempts++
-					if maxAttempts != 0 && attempts > maxAttempts {
-						// give up
-						break
-					}
-
-					b, retry, err := w.client.do(req)
-					if err != nil {
-						continue
-					}
-					if retry {
-						err = errors.New("HTTP Status Code 5xx")
-						continue
-					}
-
-					_, name := path.Split(target)
-					err = createFile(path.Join(output, name), b)
-					if err != nil {
-						continue
-					}
-
-					// successful
-					break
-				}
+				err := w.client.download(ctx, target)
 				if err != nil {
 					errChannel <- err
 				}
@@ -160,6 +125,47 @@ func (w *worker) start(ctx context.Context) {
 
 func (w *worker) stop() {
 	close(w.quit)
+}
+
+func (c *Client) download(ctx context.Context, target string) error {
+	var (
+		req *http.Request
+		err error
+	)
+
+	req, err = newRequest(ctx, target)
+	if err != nil {
+		return err
+	}
+
+	var attempts int64
+	maxAttempts := c.opt.MaxAttempts
+	for {
+		attempts++
+		if maxAttempts != 0 && attempts > maxAttempts {
+			// give up
+			break
+		}
+
+		b, retry, err := c.do(req)
+		if err != nil {
+			continue
+		}
+		if retry {
+			err = errors.New("HTTP Status Code 5xx")
+			continue
+		}
+
+		_, name := path.Split(target)
+		err = createFile(path.Join(c.opt.Output, name), b)
+		if err != nil {
+			continue
+		}
+
+		// successful
+		break
+	}
+	return err
 }
 
 func newRequest(ctx context.Context, target string) (*http.Request, error) {
