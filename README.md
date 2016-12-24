@@ -28,21 +28,21 @@ That's all !
 
 ```go
 opt := &paralleldl.Options{
-  Output:           "/path/to/download",
-  MaxConcurrents:   2,
-  MaxErrorRequests: 1,
-  MaxAttempts:      4,
+	Output:           "/path/to/download",
+	MaxConcurrents:   2,
+	MaxErrorRequests: 1,
+	MaxAttempts:      4,
 }
 client, err := paralleldl.New(opt)
 if err != nil {
-  log.Fatal(err)
+	log.Fatal(err)
 }
 
 lists := []string{
-  "http://example.com/file1",
-  "http://example.com/file2",
-  "http://example.com/file3",
-  "http://example.com/file4",
+	"http://example.com/file1",
+	"http://example.com/file2",
+	"http://example.com/file3",
+	"http://example.com/file4",
 }
 errCnt := client.Download(lists)
 ```
@@ -51,7 +51,7 @@ errCnt := client.Download(lists)
 
 ```go
 opt := &paralleldl.Options{
-  Output: "/path/to/download",
+	Output: "/path/to/download",
 }
 ```
 
