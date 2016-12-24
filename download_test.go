@@ -5,11 +5,14 @@ import (
 	"context"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/fortytw2/leaktest"
 )
 
 func TestDownload(t *testing.T) {
+	defer leaktest.Check(t)()
+
 	dir, removeDir := createTestTempDir(t)
 	defer removeDir() // clean up
 
@@ -44,7 +47,7 @@ func TestDownload_Error1(t *testing.T) {
 		Output:           dir,
 		MaxErrorRequests: 2,
 		MaxAttempts:      2,
-		Timeout:          5,
+		Timeout:          5 * time.Second,
 	}
 	client, err := New(opt)
 	if err != nil {
@@ -75,7 +78,7 @@ func TestDownload_Error2(t *testing.T) {
 		Output:           dir,
 		MaxErrorRequests: 1,
 		MaxAttempts:      2,
-		Timeout:          5,
+		Timeout:          5 * time.Second,
 	}
 	client, err := New(opt)
 	if err != nil {
