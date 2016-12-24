@@ -64,7 +64,7 @@ func (d *dispatcher) start(list []string) {
 				if maxErrCounts == 0 {
 					continue
 				}
-				if maxErrCounts <= atomic.LoadInt64(&d.res.errCnt) {
+				if maxErrCounts <= d.errCounts() {
 					ctxCancel()
 					d.stop()
 					return
