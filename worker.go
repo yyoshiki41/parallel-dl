@@ -55,6 +55,7 @@ func (d *dispatcher) start(list []string) {
 					if d.maxErrCounts != 0 && d.maxErrCounts <= atomic.LoadInt64(&d.errCounts) {
 						ctxCancel()
 						d.stop()
+						return
 					}
 				}
 			case <-d.done:
