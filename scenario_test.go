@@ -1,24 +1,29 @@
 package paralleldl
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	"github.com/fortytw2/leaktest"
 )
 
+func setupTestDownload(t *testing.T, opt *Options) (*Client, *httptest.Server, func()) {
+	dir, removeDir := createTestTempDir(t)
+	opt.Output = dir
+	client, _ := New(opt)
+
+	ts := runTestServer()
+
+	return client, ts, func() { removeDir() }
+}
+
 func TestDownload(t *testing.T) {
 	defer leaktest.Check(t)()
 
-	dir, removeDir := createTestTempDir(t)
+	opt := &Options{}
+	client, ts, removeDir := setupTestDownload(t, opt)
 	defer removeDir() // clean up
-
-	ts := runTestServer()
 	defer ts.Close()
-
-	client, err := New(&Options{Output: dir})
-	if err != nil {
-		t.Fatalf("Failed to construct client: %s", err)
-	}
 
 	lists := []string{
 		ts.URL + "/ok1",
@@ -33,20 +38,12 @@ func TestDownload(t *testing.T) {
 func TestDownload_Error1(t *testing.T) {
 	defer leaktest.Check(t)()
 
-	dir, removeDir := createTestTempDir(t)
-	defer removeDir() // clean up
-
-	ts := runTestServer()
-	defer ts.Close()
-
 	opt := &Options{
-		Output:      dir,
 		MaxAttempts: 1,
 	}
-	client, err := New(opt)
-	if err != nil {
-		t.Fatalf("Failed to construct client: %s", err)
-	}
+	client, ts, removeDir := setupTestDownload(t, opt)
+	defer removeDir() // clean up
+	defer ts.Close()
 
 	lists := []string{
 		ts.URL + "/ok1",
@@ -62,21 +59,13 @@ func TestDownload_Error1(t *testing.T) {
 func TestDownload_Error2(t *testing.T) {
 	defer leaktest.Check(t)()
 
-	dir, removeDir := createTestTempDir(t)
-	defer removeDir() // clean up
-
-	ts := runTestServer()
-	defer ts.Close()
-
 	opt := &Options{
-		Output:           dir,
 		MaxErrorRequests: 1,
 		MaxAttempts:      4,
 	}
-	client, err := New(opt)
-	if err != nil {
-		t.Fatalf("Failed to construct client: %s", err)
-	}
+	client, ts, removeDir := setupTestDownload(t, opt)
+	defer removeDir() // clean up
+	defer ts.Close()
 
 	lists := []string{
 		ts.URL + "/ok1",
@@ -92,22 +81,14 @@ func TestDownload_Error2(t *testing.T) {
 func TestDownload_Error3(t *testing.T) {
 	defer leaktest.Check(t)()
 
-	dir, removeDir := createTestTempDir(t)
-	defer removeDir() // clean up
-
-	ts := runTestServer()
-	defer ts.Close()
-
 	opt := &Options{
-		Output:           dir,
 		MaxConcurrents:   1,
 		MaxErrorRequests: 1,
 		MaxAttempts:      1024,
 	}
-	client, err := New(opt)
-	if err != nil {
-		t.Fatalf("Failed to construct client: %s", err)
-	}
+	client, ts, removeDir := setupTestDownload(t, opt)
+	defer removeDir() // clean up
+	defer ts.Close()
 
 	lists := []string{
 		ts.URL + "/error",
@@ -123,22 +104,14 @@ func TestDownload_Error3(t *testing.T) {
 func TestDownload_Error4(t *testing.T) {
 	defer leaktest.Check(t)()
 
-	dir, removeDir := createTestTempDir(t)
-	defer removeDir() // clean up
-
-	ts := runTestServer()
-	defer ts.Close()
-
 	opt := &Options{
-		Output:           dir,
 		MaxConcurrents:   1,
 		MaxErrorRequests: 1,
 		MaxAttempts:      1024,
 	}
-	client, err := New(opt)
-	if err != nil {
-		t.Fatalf("Failed to construct client: %s", err)
-	}
+	client, ts, removeDir := setupTestDownload(t, opt)
+	defer removeDir() // clean up
+	defer ts.Close()
 
 	lists := []string{
 		ts.URL + "/not-found",
