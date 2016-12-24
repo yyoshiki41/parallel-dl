@@ -5,6 +5,8 @@ import (
 	"context"
 	"path"
 	"testing"
+
+	"github.com/fortytw2/leaktest"
 )
 
 func TestDownload(t *testing.T) {
@@ -29,7 +31,40 @@ func TestDownload(t *testing.T) {
 	}
 }
 
-func TestDownloadError1(t *testing.T) {
+func TestDownload_Error1(t *testing.T) {
+	defer leaktest.Check(t)()
+
+	dir, removeDir := createTestTempDir(t)
+	defer removeDir() // clean up
+
+	ts := runTestServer()
+	defer ts.Close()
+
+	opt := &Options{
+		Output:           dir,
+		MaxErrorRequests: 2,
+		MaxAttempts:      2,
+		Timeout:          5,
+	}
+	client, err := New(opt)
+	if err != nil {
+		t.Fatalf("Failed to construct client: %s", err)
+	}
+
+	lists := []string{
+		ts.URL + "/ok1",
+		ts.URL + "/ok2",
+		ts.URL + "/error",
+	}
+	errCounts := client.Download(lists)
+	if expected := int64(1); errCounts != expected {
+		t.Errorf("expected %d, but got %d", expected, errCounts)
+	}
+}
+
+func TestDownload_Error2(t *testing.T) {
+	defer leaktest.Check(t)()
+
 	dir, removeDir := createTestTempDir(t)
 	defer removeDir() // clean up
 
@@ -40,6 +75,7 @@ func TestDownloadError1(t *testing.T) {
 		Output:           dir,
 		MaxErrorRequests: 1,
 		MaxAttempts:      2,
+		Timeout:          5,
 	}
 	client, err := New(opt)
 	if err != nil {
@@ -48,7 +84,7 @@ func TestDownloadError1(t *testing.T) {
 
 	lists := []string{
 		ts.URL + "/ok1",
-		ts.URL + "/ok2",
+		ts.URL + "/error",
 		ts.URL + "/error",
 	}
 	errCounts := client.Download(lists)

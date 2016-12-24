@@ -8,10 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path"
-)
-
-var (
-	errChannel chan error
+	"sync/atomic"
 )
 
 // Download downloads the lists resources.
@@ -22,16 +19,14 @@ func (c *Client) Download(list []string) int64 {
 		maxWorkers = len(list)
 	}
 
-	errChannel = make(chan error, maxQueues)
-
 	d := newDispatcher(c, maxQueues, maxWorkers)
 	d.start()
 
 	for _, v := range list {
 		d.add(v)
 	}
-	d.wait()
-	return d.errRequests
+	d.stop()
+	return atomic.LoadInt64(&d.errRequests.counts)
 }
 
 func (c *Client) download(ctx context.Context, target string) error {

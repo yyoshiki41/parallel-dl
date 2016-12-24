@@ -6,29 +6,55 @@ import (
 	"sync/atomic"
 )
 
-var (
-	wg sync.WaitGroup
-)
+type results struct {
+	wg         sync.WaitGroup
+	errMax     int64
+	errCounts  int64
+	errChannel chan error
+}
+
+func newResults(maxQueues int, maxErrRequests int64) *errRequests {
+	return &errRequests{
+		max:     maxErrRequests,
+		counts:  0,
+		channel: make(chan error, maxQueues),
+	}
+}
+
+func (e *errRequests) add() {
+	atomic.AddInt64(&e.counts, 1)
+}
+
+func (e *errRequests) isOver() bool {
+	if e.max == 0 {
+		return false
+	}
+	return atomic.LoadInt64(&e.counts) < e.max
+}
 
 type dispatcher struct {
 	jobQueue    chan string
 	workers     []*worker
 	workerPool  chan *worker
-	errRequests int64
+	done        chan struct{}
+	errRequests *errRequests
 }
 
 func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
+	errReq := newErrRequests(maxQueues, c.opt.MaxErrorRequests)
 	d := &dispatcher{
-		jobQueue:   make(chan string, maxQueues),
-		workerPool: make(chan *worker, maxWorkers),
+		jobQueue:    make(chan string, maxQueues),
+		workerPool:  make(chan *worker, maxWorkers),
+		errRequests: errReq,
 	}
 	d.workers = make([]*worker, maxWorkers)
 	for i := 0; i < maxWorkers; i++ {
 		w := worker{
-			pool:   d.workerPool,
-			client: c,
-			target: make(chan string),
-			quit:   make(chan struct{}),
+			pool:        d.workerPool,
+			client:      c,
+			target:      make(chan string),
+			done:        make(chan struct{}),
+			errRequests: errReq,
 		}
 		d.workers[i] = &w
 	}
@@ -41,32 +67,30 @@ func (d *dispatcher) start() {
 		w.start(ctx)
 	}
 
-	go func(maxErrRequests int64) {
+	go func() {
 		for {
 			select {
 			case v := <-d.jobQueue:
 				worker := <-d.workerPool
 				worker.target <- v
-			case <-errChannel:
-				atomic.AddInt64(&d.errRequests, 1)
-				if maxErrRequests != 0 && d.errRequests >= maxErrRequests {
+			case <-d.errRequests.channel:
+				d.errRequests.add()
+				if d.errRequests.isOver() {
 					ctxCancel()
-					d.stop()
 					return
 				}
+			case <-d.done:
+				return
 			}
 		}
-	}(d.workers[0].client.opt.MaxErrorRequests)
+	}()
 }
 
 func (d *dispatcher) stop() {
+	wg.Wait()
 	for _, w := range d.workers {
 		w.stop()
 	}
-}
-
-func (d *dispatcher) wait() {
-	wg.Wait()
 }
 
 func (d *dispatcher) add(v string) {
@@ -75,10 +99,11 @@ func (d *dispatcher) add(v string) {
 }
 
 type worker struct {
-	pool   chan *worker
-	client *Client
-	target chan string
-	quit   chan struct{}
+	pool        chan *worker
+	errRequests *errRequests
+	client      *Client
+	done        chan struct{}
+	target      chan string
 }
 
 func (w *worker) start(ctx context.Context) {
@@ -89,11 +114,11 @@ func (w *worker) start(ctx context.Context) {
 			case target := <-w.target:
 				err := w.client.download(ctx, target)
 				if err != nil {
-					errChannel <- err
+					w.errRequests.channel <- err
 				}
 				wg.Done()
 
-			case <-w.quit:
+			case <-w.done:
 				return
 			}
 		}
@@ -101,5 +126,5 @@ func (w *worker) start(ctx context.Context) {
 }
 
 func (w *worker) stop() {
-	close(w.quit)
+	close(w.done)
 }
