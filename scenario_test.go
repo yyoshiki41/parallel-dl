@@ -61,7 +61,7 @@ func TestDownload_Error2(t *testing.T) {
 
 	opt := &Options{
 		MaxErrorRequests: 1,
-		MaxAttempts:      4,
+		MaxAttempts:      2,
 	}
 	client, ts, removeDir := setupTestDownload(t, opt)
 	defer removeDir() // clean up
