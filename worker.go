@@ -6,27 +6,33 @@ import (
 	"sync/atomic"
 )
 
-var wg sync.WaitGroup
+type results struct {
+	wg     sync.WaitGroup
+	errCh  chan error
+	errCnt int64
+}
 
 type dispatcher struct {
-	jobQueue     chan string
-	workers      []*worker
-	done         chan struct{}
-	maxErrCounts int64
-	errCounts    int64
+	jobQueue chan string
+	workers  []*worker
+	res      *results
+	done     chan struct{}
 }
 
 func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
+	r := &results{errCh: make(chan error)}
+
 	d := &dispatcher{
-		jobQueue:     make(chan string, maxQueues),
-		maxErrCounts: c.opt.MaxErrorRequests,
-		done:         make(chan struct{}, 1),
+		jobQueue: make(chan string, maxQueues),
+		workers:  make([]*worker, maxWorkers),
+		res:      r,
+		done:     make(chan struct{}, 1),
 	}
-	d.workers = make([]*worker, maxWorkers)
 	for i := 0; i < maxWorkers; i++ {
 		w := worker{
 			client: c,
 			done:   make(chan struct{}, 1),
+			res:    r,
 		}
 		d.workers[i] = &w
 	}
@@ -34,25 +40,27 @@ func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
 }
 
 func (d *dispatcher) start(list []string) {
+	maxErrCounts := d.workers[0].client.opt.MaxErrorRequests
+	d.res.wg.Add(len(d.workers))
+
 	for _, v := range list {
 		d.jobQueue <- v
 	}
 
-	errChannel := make(chan error)
-
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	wg.Add(len(d.workers))
 	for _, w := range d.workers {
-		w.start(ctx, d.jobQueue, errChannel)
+		w.start(ctx, d.jobQueue)
 	}
 
 	go func() {
 		for {
 			select {
-			case err := <-errChannel:
+			case err := <-d.res.errCh:
 				if err != nil {
-					atomic.AddInt64(&d.errCounts, 1)
-					if d.maxErrCounts != 0 && d.maxErrCounts <= atomic.LoadInt64(&d.errCounts) {
+					if maxErrCounts != 0 {
+						continue
+					}
+					if maxErrCounts <= atomic.LoadInt64(&d.res.errCnt) {
 						ctxCancel()
 						d.stop()
 						return
@@ -67,7 +75,7 @@ func (d *dispatcher) start(list []string) {
 
 func (d *dispatcher) wait() {
 	close(d.jobQueue)
-	wg.Wait()
+	d.res.wg.Wait()
 	d.done <- struct{}{}
 }
 
@@ -77,18 +85,27 @@ func (d *dispatcher) stop() {
 	}
 }
 
+func (d *dispatcher) errCounts() int64 {
+	return atomic.LoadInt64(&d.res.errCnt)
+}
+
 type worker struct {
 	client *Client
+	res    *results
 	done   chan struct{}
 }
 
-func (w *worker) start(ctx context.Context, jobQueue chan string, errChannel chan error) {
+func (w *worker) start(ctx context.Context, jobQueue chan string) {
 	go func() {
-		defer wg.Done()
+		defer w.res.wg.Done()
+
 		for target := range jobQueue {
 			err := w.client.download(ctx, target)
+			if err != nil {
+				atomic.AddInt64(&w.res.errCnt, 1)
+			}
 			select {
-			case errChannel <- err:
+			case w.res.errCh <- err:
 			case <-w.done:
 				return
 			}

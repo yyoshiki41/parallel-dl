@@ -91,7 +91,7 @@ func TestDownload_Error2(t *testing.T) {
 		ts.URL + "/error",
 	}
 	errCounts := client.Download(lists)
-	if expected := int64(1); errCounts != expected {
+	if expected := int64(2); errCounts != expected {
 		t.Errorf("expected %d, but got %d", expected, errCounts)
 	}
 }

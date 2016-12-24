@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"sync/atomic"
 )
 
 // Download downloads the lists resources.
@@ -22,7 +21,7 @@ func (c *Client) Download(list []string) int64 {
 	d := newDispatcher(c, maxQueues, maxWorkers)
 	d.start(list)
 	d.wait()
-	return atomic.LoadInt64(&d.errCounts)
+	return d.errCounts()
 }
 
 func (c *Client) download(ctx context.Context, target string) error {
