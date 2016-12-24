@@ -3,6 +3,7 @@ package paralleldl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -45,6 +46,9 @@ func (c *Client) download(ctx context.Context, target string) error {
 
 		b, retry, err = c.do(req)
 		if err != nil {
+			if !retry {
+				break
+			}
 			continue
 		}
 		if retry {
@@ -82,7 +86,12 @@ func (c *Client) do(req *http.Request) ([]byte, bool, error) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 500 {
+	statusCode := resp.StatusCode
+	if 400 <= statusCode && statusCode < 500 {
+		return nil, false, fmt.Errorf("Client Error: %d", resp.StatusCode)
+	}
+
+	if statusCode >= 500 {
 		return nil, true, nil
 	}
 

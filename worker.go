@@ -20,7 +20,11 @@ type dispatcher struct {
 }
 
 func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
-	r := &results{errCh: make(chan error)}
+	r := &results{
+		errCh:  make(chan error),
+		errCnt: 0,
+	}
+	r.wg.Add(maxWorkers)
 
 	d := &dispatcher{
 		jobQueue: make(chan string, maxQueues),
@@ -41,7 +45,6 @@ func newDispatcher(c *Client, maxQueues, maxWorkers int) *dispatcher {
 
 func (d *dispatcher) start(list []string) {
 	maxErrCounts := d.workers[0].client.opt.MaxErrorRequests
-	d.res.wg.Add(len(d.workers))
 
 	for _, v := range list {
 		d.jobQueue <- v
@@ -51,20 +54,20 @@ func (d *dispatcher) start(list []string) {
 	for _, w := range d.workers {
 		w.start(ctx, d.jobQueue)
 	}
-
 	go func() {
 		for {
 			select {
 			case err := <-d.res.errCh:
-				if err != nil {
-					if maxErrCounts != 0 {
-						continue
-					}
-					if maxErrCounts <= atomic.LoadInt64(&d.res.errCnt) {
-						ctxCancel()
-						d.stop()
-						return
-					}
+				if err == nil {
+					continue
+				}
+				if maxErrCounts == 0 {
+					continue
+				}
+				if maxErrCounts <= atomic.LoadInt64(&d.res.errCnt) {
+					ctxCancel()
+					d.stop()
+					return
 				}
 			case <-d.done:
 				return
