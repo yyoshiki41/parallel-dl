@@ -1,11 +1,16 @@
 PKGS=$(shell go list ./... | grep -v examples)
 
-.PHONY: all help test test-ci
+.PHONY: all help get-deps test test-ci
 
 all: help
 
 help:
+	@echo "make get-deps      #=> Install dependencies"
 	@echo "make test          #=> Run tests"
+
+get-deps:
+	@echo "go get leaktest"
+	@go get github.com/fortytw2/leaktest
 
 test:
 	go test $(PKGS)

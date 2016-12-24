@@ -6,6 +6,9 @@ go:
 
 sudo: false
 
+install:
+  - make get-deps
+
 script:
   - make test-ci
 
